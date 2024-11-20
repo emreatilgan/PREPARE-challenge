@@ -3,6 +3,10 @@ import numpy as np
 from pathlib import Path
 from src.models.lgb_model import LGBModel
 from src.models.pipeline import ModelingPipeline
+from src.features.build_features import FeatureEngineer
+import warnings
+warnings.filterwarnings("ignore")
+
 
 def prepare_data(train_features, train_labels):
     """Prepare data by properly merging features and labels"""
@@ -28,9 +32,19 @@ def train_and_evaluate():
     test_features = pd.read_csv(data_dir / 'test_features.csv')
     submission_format = pd.read_csv(data_dir / 'submission_format.csv')
     
+    # Create feature engineer
+    feature_engineer = FeatureEngineer()
+    
+    # Engineer features for train and test
+    print("\nEngineering features for training data...")
+    train_features_engineered = feature_engineer.fit_transform(train_features)
+    
+    print("\nEngineering features for test data...")
+    test_features_engineered = feature_engineer.transform(test_features)
+    
     # Prepare training data
-    print("Preparing training data...")
-    train_data = prepare_data(train_features, train_labels)
+    print("\nPreparing training data...")
+    train_data = prepare_data(train_features_engineered, train_labels)
     
     # Initialize pipeline with LightGBM model
     pipeline = ModelingPipeline(
@@ -64,8 +78,8 @@ def train_and_evaluate():
     )
     
     print(f"\nCV RMSE: {cv_score:.4f}")
-    print("\nTop 10 Important Features:")
-    print(feature_importance.head(10))
+    print("\nTop 20 Important Features:")
+    print(feature_importance.head(20))
     
     # Make predictions
     print("\nMaking predictions...")
@@ -74,13 +88,13 @@ def train_and_evaluate():
     submission = submission_format.copy()
     
     # Get predictions for test set
-    test_predictions = pipeline.predict(test_features)
+    test_predictions = pipeline.predict(test_features_engineered)
     
     # Round predictions to nearest integer and ensure they're within valid range
     test_predictions = np.round(test_predictions).clip(0, 384).astype(int)
     
     # Create a mapping from uid to prediction
-    predictions_dict = dict(zip(test_features['uid'], test_predictions))
+    predictions_dict = dict(zip(test_features_engineered['uid'], test_predictions))
     
     # Map predictions to submission format
     submission['composite_score'] = submission['uid'].map(predictions_dict).astype(int)
@@ -94,12 +108,20 @@ def train_and_evaluate():
     print(submission['composite_score'].describe())
     
     # Save submission
-    submission.to_csv('submissions/baseline_submission.csv', index=False)
+    submission.to_csv('submissions/submission_with_features.csv', index=False)
     print(f"\nSubmission saved with {len(submission)} predictions")
     
     # Save model
-    pipeline.save('models/baseline_model.pkl')
+    pipeline.save('models/model_with_features.pkl')
     print("\nModel saved")
+    
+    # Save feature importance analysis
+    feature_importance_df = pd.DataFrame({
+        'feature': feature_importance.index,
+        'importance': feature_importance.values
+    })
+    feature_importance_df.to_csv('analysis/feature_importance.csv', index=False)
+    print("\nFeature importance analysis saved")
     
     return cv_score, feature_importance
 
