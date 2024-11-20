@@ -8,6 +8,25 @@ class FeatureEngineer:
     def __init__(self):
         self.temporal_suffixes = ['_03', '_12']
     
+    def _convert_to_numeric(self, df: pd.DataFrame, col: str) -> pd.Series:
+        """Convert a column to numeric, handling categorical variables"""
+        if df[col].dtype == 'object':
+            # For categorical health indicators, convert to numeric
+            if 'glob_hlth' in col:
+                # Map health categories to numeric scores
+                health_map = {
+                    'excellent': 5,
+                    'very good': 4,
+                    'good': 3,
+                    'fair': 2,
+                    'poor': 1
+                }
+                return df[col].map(health_map).fillna(df[col].map(health_map).median())
+            else:
+                # For other categorical variables, use label encoding
+                return pd.Categorical(df[col]).codes
+        return df[col]
+    
     def create_temporal_changes(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create features representing changes between 2003 and 2012"""
         df = df.copy()
@@ -25,7 +44,11 @@ class FeatureEngineer:
             col_03 = f"{base_col}_03"
             col_12 = f"{base_col}_12"
             
-            if df[col_03].dtype in ['int64', 'float64'] and df[col_12].dtype in ['int64', 'float64']:
+            # Convert both columns to numeric
+            df[col_03] = pd.to_numeric(df[col_03], errors='coerce')
+            df[col_12] = pd.to_numeric(df[col_12], errors='coerce')
+            
+            if pd.api.types.is_numeric_dtype(df[col_03]) and pd.api.types.is_numeric_dtype(df[col_12]):
                 # Absolute change
                 df[f"{base_col}_change"] = df[col_12] - df[col_03]
                 
@@ -54,15 +77,20 @@ class FeatureEngineer:
                 f'n_illnesses{suffix}'
             ]
             
-            # Create normalized versions of each indicator
+            # Convert and normalize indicators
+            normalized_indicators = []
             for col in health_indicators:
                 if col in df.columns:
-                    df[f'{col}_norm'] = (df[col] - df[col].mean()) / df[col].std()
+                    # Convert to numeric
+                    numeric_col = self._convert_to_numeric(df, col)
+                    # Normalize
+                    if numeric_col.std() != 0:
+                        df[f'{col}_norm'] = (numeric_col - numeric_col.mean()) / numeric_col.std()
+                        normalized_indicators.append(f'{col}_norm')
             
-            # Combine normalized indicators
-            norm_cols = [col + '_norm' for col in health_indicators if col in df.columns]
-            if norm_cols:
-                df[f'health_score{suffix}'] = df[norm_cols].mean(axis=1)
+            # Create composite score
+            if normalized_indicators:
+                df[f'health_score{suffix}'] = df[normalized_indicators].mean(axis=1)
         
         return df
     
@@ -84,15 +112,16 @@ class FeatureEngineer:
                     'table_games_12'
                 ])
             
-            # Convert categorical columns to numeric
+            # Convert all columns to numeric
+            numeric_social_cols = []
             for col in social_cols:
-                if col in df.columns and df[col].dtype == 'object':
-                    df[col] = pd.Categorical(df[col]).codes
+                if col in df.columns:
+                    df[f'{col}_numeric'] = self._convert_to_numeric(df, col)
+                    numeric_social_cols.append(f'{col}_numeric')
             
             # Calculate social engagement score
-            valid_cols = [col for col in social_cols if col in df.columns]
-            if valid_cols:
-                df[f'social_score{suffix}'] = df[valid_cols].mean(axis=1)
+            if numeric_social_cols:
+                df[f'social_score{suffix}'] = df[numeric_social_cols].mean(axis=1)
             
             # Physical activity score
             activity_cols = [
@@ -100,9 +129,15 @@ class FeatureEngineer:
                 f'n_adl{suffix}',
                 f'n_iadl{suffix}'
             ]
-            valid_cols = [col for col in activity_cols if col in df.columns]
-            if valid_cols:
-                df[f'activity_score{suffix}'] = df[valid_cols].mean(axis=1)
+            
+            numeric_activity_cols = []
+            for col in activity_cols:
+                if col in df.columns:
+                    df[f'{col}_numeric'] = self._convert_to_numeric(df, col)
+                    numeric_activity_cols.append(f'{col}_numeric')
+            
+            if numeric_activity_cols:
+                df[f'activity_score{suffix}'] = df[numeric_activity_cols].mean(axis=1)
             
             # Mental activity score (especially for 2012)
             if suffix == '_12':
@@ -111,7 +146,14 @@ class FeatureEngineer:
                     'games_12',
                     'attends_class_12'
                 ]
-                df['mental_activity_score_12'] = df[mental_cols].mean(axis=1)
+                numeric_mental_cols = []
+                for col in mental_cols:
+                    if col in df.columns:
+                        df[f'{col}_numeric'] = self._convert_to_numeric(df, col)
+                        numeric_mental_cols.append(f'{col}_numeric')
+                
+                if numeric_mental_cols:
+                    df['mental_activity_score_12'] = df[numeric_mental_cols].mean(axis=1)
         
         return df
     
@@ -129,14 +171,18 @@ class FeatureEngineer:
                 f'rinc_pension{suffix}'
             ]
             
-            valid_cols = [col for col in income_cols if col in df.columns]
+            numeric_income_cols = []
+            for col in income_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    numeric_income_cols.append(col)
             
-            if valid_cols:
+            if numeric_income_cols:
                 # Total income
-                df[f'total_income{suffix}'] = df[valid_cols].sum(axis=1)
+                df[f'total_income{suffix}'] = df[numeric_income_cols].sum(axis=1)
                 
                 # Income diversity (number of non-zero income sources)
-                df[f'income_sources{suffix}'] = (df[valid_cols] > 0).sum(axis=1)
+                df[f'income_sources{suffix}'] = (df[numeric_income_cols] > 0).sum(axis=1)
                 
                 # Income stability (pension to total income ratio)
                 pension_col = f'rinc_pension{suffix}'
@@ -161,9 +207,15 @@ class FeatureEngineer:
                 f'out_proc{suffix}',
                 f'visit_dental{suffix}'
             ]
-            valid_cols = [col for col in utilization_cols if col in df.columns]
-            if valid_cols:
-                df[f'healthcare_utilization{suffix}'] = df[valid_cols].mean(axis=1)
+            
+            numeric_utilization_cols = []
+            for col in utilization_cols:
+                if col in df.columns:
+                    df[f'{col}_numeric'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    numeric_utilization_cols.append(f'{col}_numeric')
+            
+            if numeric_utilization_cols:
+                df[f'healthcare_utilization{suffix}'] = df[numeric_utilization_cols].mean(axis=1)
             
             # Insurance coverage score
             insurance_cols = [
@@ -174,10 +226,15 @@ class FeatureEngineer:
             ]
             if suffix == '_12':
                 insurance_cols.append('seg_pop_12')
-                
-            valid_cols = [col for col in insurance_cols if col in df.columns]
-            if valid_cols:
-                df[f'insurance_coverage{suffix}'] = df[valid_cols].sum(axis=1)
+            
+            numeric_insurance_cols = []
+            for col in insurance_cols:
+                if col in df.columns:
+                    df[f'{col}_numeric'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    numeric_insurance_cols.append(f'{col}_numeric')
+            
+            if numeric_insurance_cols:
+                df[f'insurance_coverage{suffix}'] = df[numeric_insurance_cols].sum(axis=1)
         
         return df
     
@@ -186,20 +243,25 @@ class FeatureEngineer:
         df = df.copy()
         
         for suffix in self.temporal_suffixes:
-            # Education and cognitive activity interaction
+            # Convert education to numeric if needed
             edu_col = f'edu_gru{suffix}'
             if edu_col in df.columns:
-                if suffix == '_12' and 'reads_12' in df.columns:
-                    df[f'edu_reading_interaction{suffix}'] = df[edu_col] * df['reads_12']
+                df[f'{edu_col}_numeric'] = self._convert_to_numeric(df, edu_col)
                 
-                # Education and social engagement
+                if suffix == '_12' and 'reads_12' in df.columns:
+                    reads_numeric = self._convert_to_numeric(df, 'reads_12')
+                    df[f'edu_reading_interaction{suffix}'] = df[f'{edu_col}_numeric'] * reads_numeric
+                
+                # Education and social interaction
                 if f'social_score{suffix}' in df.columns:
-                    df[f'edu_social_interaction{suffix}'] = df[edu_col] * df[f'social_score{suffix}']
+                    df[f'edu_social_interaction{suffix}'] = df[f'{edu_col}_numeric'] * df[f'social_score{suffix}']
             
             # Age and health interaction
             age_col = f'age{suffix}'
-            if age_col in df.columns and f'health_score{suffix}' in df.columns:
-                df[f'age_health_interaction{suffix}'] = df[age_col] * df[f'health_score{suffix}']
+            if age_col in df.columns:
+                df[f'{age_col}_numeric'] = self._convert_to_numeric(df, age_col)
+                if f'health_score{suffix}' in df.columns:
+                    df[f'age_health_interaction{suffix}'] = df[f'{age_col}_numeric'] * df[f'health_score{suffix}']
         
         return df
     
