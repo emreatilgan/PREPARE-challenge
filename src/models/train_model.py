@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from src.models.lgb_model import LGBModel
 from src.models.pipeline import ModelingPipeline
@@ -75,19 +76,26 @@ def train_and_evaluate():
     # Get predictions for test set
     test_predictions = pipeline.predict(test_features)
     
+    # Round predictions to nearest integer and ensure they're within valid range
+    test_predictions = np.round(test_predictions).clip(0, 384).astype(int)
+    
     # Create a mapping from uid to prediction
     predictions_dict = dict(zip(test_features['uid'], test_predictions))
     
     # Map predictions to submission format
-    submission['composite_score'] = submission['uid'].map(predictions_dict)
+    submission['composite_score'] = submission['uid'].map(predictions_dict).astype(int)
+    
+    # Verify submission format
+    print("\nVerifying submission format...")
+    print("Submission shape:", submission.shape)
+    print("Submission dtypes:")
+    print(submission.dtypes)
+    print("\nPrediction statistics:")
+    print(submission['composite_score'].describe())
     
     # Save submission
     submission.to_csv('submissions/baseline_submission.csv', index=False)
     print(f"\nSubmission saved with {len(submission)} predictions")
-    
-    # Print submission statistics
-    print("\nSubmission Statistics:")
-    print(submission['composite_score'].describe())
     
     # Save model
     pipeline.save('models/baseline_model.pkl')
