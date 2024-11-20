@@ -5,6 +5,25 @@ from pathlib import Path
 from src.models.lgb_model import LGBModel
 from src.models.pipeline import ModelingPipeline
 
+def process_parameters(params: dict) -> dict:
+    """Convert parameters to appropriate types"""
+    processed_params = {}
+    
+    # Define which parameters should be integers
+    int_params = [
+        'num_leaves', 'bagging_freq', 'min_child_samples',
+        'max_depth', 'min_data_in_leaf'
+    ]
+    
+    # Convert parameters to appropriate types
+    for key, value in params.items():
+        if key in int_params:
+            processed_params[key] = int(value)
+        else:
+            processed_params[key] = float(value)
+    
+    return processed_params
+
 def train_and_evaluate():
     """Train model with optimal parameters and create submission"""
     
@@ -15,17 +34,19 @@ def train_and_evaluate():
     test_features = pd.read_csv(data_dir / 'test_features.csv')
     submission_format = pd.read_csv(data_dir / 'submission_format.csv')
     
-    # Load best parameters
+    # Load and process best parameters
     try:
-        best_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        raw_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        best_params = process_parameters(raw_params)
         print("\nLoaded best parameters:")
         for key, value in best_params.items():
-            print(f"  {key}: {value}")
+            print(f"  {key}: {value} ({type(value).__name__})")
     except FileNotFoundError:
         print("\nNo optimized parameters found. Running hyperparameter optimization first...")
         from src.models.optimize import main as optimize_main
         optimize_main()
-        best_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        raw_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        best_params = process_parameters(raw_params)
     
     # Prepare training data
     print("\nPreparing training data...")
