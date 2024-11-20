@@ -295,11 +295,7 @@ class FeatureEngineer:
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply feature engineering to new data"""
         return self.fit_transform(df)
-    
-# src/features/build_features_v2.py
-import pandas as pd
-import numpy as np
-from typing import List, Dict, Tuple
+
 
 class FeatureEngineerV2:
     """Focused feature engineering pipeline based on important predictors"""
@@ -330,7 +326,7 @@ class FeatureEngineerV2:
                     'secondary': 4,
                     'preparatory or higher': 5
                 }
-                return df[col].map(edu_order).fillna(df[col].map(edu_order).median())
+                return df[col].map(edu_order).fillna(0)
             elif 'age' in col:
                 # Convert age groups to numeric
                 age_map = {
@@ -358,22 +354,28 @@ class FeatureEngineerV2:
                     df[col_03] = pd.to_numeric(self._convert_to_numeric(df, col_03), errors='coerce')
                     df[col_12] = pd.to_numeric(self._convert_to_numeric(df, col_12), errors='coerce')
                     
+                    # Fill NaN values with 0
+                    df[col_03] = df[col_03].fillna(0)
+                    df[col_12] = df[col_12].fillna(0)
+                    
                     # Absolute change
                     df[f"{base_col}_change"] = df[col_12] - df[col_03]
                     
-                    # Percent change
+                    # Percent change (handle division by zero)
                     df[f"{base_col}_pct_change"] = np.where(
-                        df[col_03] != 0,
-                        (df[col_12] - df[col_03]) / df[col_03],
+                        (df[col_03] != 0) & np.isfinite(df[col_03]),
+                        (df[col_12] - df[col_03]) / np.abs(df[col_03]),
                         0
                     )
                     
-                    # Trend direction
-                    df[f"{base_col}_trend"] = np.sign(df[f"{base_col}_change"]).astype(int)
+                    # Replace infinite values with max/min of non-infinite values
+                    df[f"{base_col}_pct_change"] = df[f"{base_col}_pct_change"].replace([np.inf, -np.inf], 0)
+                    
+                    # Trend direction (-1, 0, 1)
+                    df[f"{base_col}_trend"] = np.sign(df[f"{base_col}_change"]).fillna(0).astype(int)
                     
                     # Acceleration (change in rate of change)
-                    if f"{base_col}_pct_change" in df.columns:
-                        df[f"{base_col}_acceleration"] = df[f"{base_col}_pct_change"] / 9  # 9 years
+                    df[f"{base_col}_acceleration"] = df[f"{base_col}_pct_change"] / 9  # 9 years
         
         return df
     
@@ -388,14 +390,14 @@ class FeatureEngineerV2:
         
         # Education level relative to parents
         if all(col in df.columns for col in ['edu_gru_12', 'rameduc_m', 'rafeduc_m']):
-            df['edu_vs_parents'] = (
-                df['edu_gru_12_numeric'] - 
-                ((df['rameduc_m_numeric'] + df['rafeduc_m_numeric']) / 2)
-            )
+            parent_edu = ((df['rameduc_m_numeric'] + df['rafeduc_m_numeric']) / 2).fillna(0)
+            df['edu_vs_parents'] = df['edu_gru_12_numeric'] - parent_edu
         
         # Education stability
         if all(col in df.columns for col in ['edu_gru_03', 'edu_gru_12']):
-            df['edu_stability'] = (df['edu_gru_03_numeric'] == df['edu_gru_12_numeric']).astype(int)
+            df['edu_stability'] = (
+                df['edu_gru_03_numeric'].fillna(0) == df['edu_gru_12_numeric'].fillna(0)
+            ).astype(int)
         
         return df
     
@@ -411,18 +413,19 @@ class FeatureEngineerV2:
                 
                 # Income quantiles
                 df[f'income_quantile{suffix}'] = pd.qcut(
-                    df[income_col], 
+                    df[income_col].clip(lower=0), 
                     q=5, 
                     labels=False, 
                     duplicates='drop'
-                )
+                ).fillna(0)
                 
                 # Working hours relative to income
                 work_hours = f'rjob_hrswk{suffix}'
                 if work_hours in df.columns:
+                    work_hours_value = pd.to_numeric(df[work_hours], errors='coerce').fillna(0)
                     df[f'income_per_hour{suffix}'] = np.where(
-                        df[work_hours] > 0,
-                        df[income_col] / df[work_hours],
+                        work_hours_value > 0,
+                        df[income_col] / work_hours_value,
                         0
                     )
         
@@ -444,16 +447,25 @@ class FeatureEngineerV2:
             if valid_cols:
                 # Convert to numeric and normalize
                 for col in valid_cols:
-                    df[f"{col}_numeric"] = self._convert_to_numeric(df, col)
-                    if df[f"{col}_numeric"].std() != 0:
+                    df[f"{col}_numeric"] = pd.to_numeric(
+                        self._convert_to_numeric(df, col), 
+                        errors='coerce'
+                    )
+                    df[f"{col}_numeric"] = df[f"{col}_numeric"].fillna(0)
+                    
+                    # Normalize non-zero values
+                    col_std = df[f"{col}_numeric"].std()
+                    if col_std != 0:
                         df[f"{col}_norm"] = (
-                            df[f"{col}_numeric"] - df[f"{col}_numeric"].mean()
-                        ) / df[f"{col}_numeric"].std()
+                            (df[f"{col}_numeric"] - df[f"{col}_numeric"].mean()) / col_std
+                        ).fillna(0)
+                    else:
+                        df[f"{col}_norm"] = 0
                 
                 # Create composite social score
                 norm_cols = [f"{col}_norm" for col in valid_cols if f"{col}_norm" in df.columns]
                 if norm_cols:
-                    df[f'social_score{suffix}'] = df[norm_cols].mean(axis=1)
+                    df[f'social_score{suffix}'] = df[norm_cols].mean(axis=1).fillna(0)
             
             # Health indicators
             health_cols = [f'n_depr{suffix}', f'bmi{suffix}']
@@ -462,16 +474,19 @@ class FeatureEngineerV2:
             if valid_health:
                 # Normalize health indicators
                 for col in valid_health:
-                    df[f"{col}_numeric"] = pd.to_numeric(df[col], errors='coerce')
-                    if df[f"{col}_numeric"].std() != 0:
+                    df[f"{col}_numeric"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    col_std = df[f"{col}_numeric"].std()
+                    if col_std != 0:
                         df[f"{col}_norm"] = (
-                            df[f"{col}_numeric"] - df[f"{col}_numeric"].mean()
-                        ) / df[f"{col}_numeric"].std()
+                            (df[f"{col}_numeric"] - df[f"{col}_numeric"].mean()) / col_std
+                        ).fillna(0)
+                    else:
+                        df[f"{col}_norm"] = 0
                 
                 # Create health score
                 health_norm = [f"{col}_norm" for col in valid_health if f"{col}_norm" in df.columns]
                 if health_norm:
-                    df[f'health_score{suffix}'] = df[health_norm].mean(axis=1)
+                    df[f'health_score{suffix}'] = df[health_norm].mean(axis=1).fillna(0)
         
         return df
     
@@ -489,14 +504,14 @@ class FeatureEngineerV2:
             
             # Create cognitive activity score
             numeric_cols = [f"{col}_numeric" for col in valid_cols]
-            df['cognitive_activity_score'] = df[numeric_cols].mean(axis=1)
+            df['cognitive_activity_score'] = df[numeric_cols].mean(axis=1).fillna(0)
             
             # Interaction with education
             if 'edu_gru_12' in df.columns:
                 df['edu_cognitive_interaction'] = (
                     df['cognitive_activity_score'] * 
                     self._convert_to_numeric(df, 'edu_gru_12')
-                )
+                ).fillna(0)
         
         return df
     
@@ -507,15 +522,22 @@ class FeatureEngineerV2:
         for suffix in self.temporal_suffixes:
             age_col = f'age{suffix}'
             if age_col in df.columns:
-                age_numeric = self._convert_to_numeric(df, age_col)
+                age_numeric = pd.to_numeric(
+                    self._convert_to_numeric(df, age_col), 
+                    errors='coerce'
+                ).fillna(0)
                 
                 # Age-health interaction
                 if f'health_score{suffix}' in df.columns:
-                    df[f'age_health_interaction{suffix}'] = age_numeric * df[f'health_score{suffix}']
+                    df[f'age_health_interaction{suffix}'] = (
+                        age_numeric * df[f'health_score{suffix}']
+                    ).fillna(0)
                 
                 # Age-social interaction
                 if f'social_score{suffix}' in df.columns:
-                    df[f'age_social_interaction{suffix}'] = age_numeric * df[f'social_score{suffix}']
+                    df[f'age_social_interaction{suffix}'] = (
+                        age_numeric * df[f'social_score{suffix}']
+                    ).fillna(0)
                 
                 # Age-education interaction
                 edu_col = f'edu_gru{suffix}'
@@ -523,7 +545,7 @@ class FeatureEngineerV2:
                     df[f'age_education_interaction{suffix}'] = (
                         age_numeric * 
                         self._convert_to_numeric(df, edu_col)
-                    )
+                    ).fillna(0)
         
         return df
     
@@ -551,14 +573,11 @@ class FeatureEngineerV2:
         df = self.create_age_interactions(df)
         print("Created age interactions")
         
-        print(f"Final shape: {df.shape}")
-        
-        # Remove any infinite values
-        df = df.replace([np.inf, -np.inf], np.nan)
-        
-        # Fill remaining NaN values with 0
+        # Final cleanup
+        df = df.replace([np.inf, -np.inf], 0)
         df = df.fillna(0)
         
+        print(f"Final shape: {df.shape}")
         return df
     
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
