@@ -66,20 +66,28 @@ def train_and_evaluate():
     print("\nTop 10 Important Features:")
     print(feature_importance.head(10))
     
-    # Make predictions for each required year
+    # Make predictions
     print("\nMaking predictions...")
-    all_predictions = []
     
-    for year in submission_format['year'].unique():
-        year_predictions = pipeline.predict(test_features)
-        submission_year = submission_format[submission_format['year'] == year].copy()
-        submission_year['composite_score'] = year_predictions
-        all_predictions.append(submission_year)
+    # Create final submission dataframe
+    submission = submission_format.copy()
     
-    # Combine predictions for all years
-    final_submission = pd.concat(all_predictions)
-    final_submission.to_csv('submissions/baseline_submission.csv', index=False)
-    print(f"\nSubmission saved with {len(final_submission)} predictions")
+    # Get predictions for test set
+    test_predictions = pipeline.predict(test_features)
+    
+    # Create a mapping from uid to prediction
+    predictions_dict = dict(zip(test_features['uid'], test_predictions))
+    
+    # Map predictions to submission format
+    submission['composite_score'] = submission['uid'].map(predictions_dict)
+    
+    # Save submission
+    submission.to_csv('submissions/baseline_submission.csv', index=False)
+    print(f"\nSubmission saved with {len(submission)} predictions")
+    
+    # Print submission statistics
+    print("\nSubmission Statistics:")
+    print(submission['composite_score'].describe())
     
     # Save model
     pipeline.save('models/baseline_model.pkl')
