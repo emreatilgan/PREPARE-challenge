@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from src.models.lgb_model import LGBModel
 from src.models.pipeline import ModelingPipeline
-from src.features.build_features import FeatureEngineer
+from src.features.build_features import FeatureEngineer, FeatureEngineerV2
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -33,7 +33,7 @@ def train_and_evaluate():
     submission_format = pd.read_csv(data_dir / 'submission_format.csv')
     
     # Create feature engineer
-    feature_engineer = FeatureEngineer()
+    feature_engineer = FeatureEngineerV2()
     
     # Engineer features for train and test
     print("\nEngineering features for training data...")
@@ -108,11 +108,11 @@ def train_and_evaluate():
     print(submission['composite_score'].describe())
     
     # Save submission
-    submission.to_csv('submissions/submission_with_features.csv', index=False)
+    submission.to_csv('submissions/submission_with_features2.csv', index=False)
     print(f"\nSubmission saved with {len(submission)} predictions")
     
     # Save model
-    pipeline.save('models/model_with_features.pkl')
+    pipeline.save('models/model_with_features2.pkl')
     print("\nModel saved")
     
     # Save feature importance analysis
@@ -120,7 +120,7 @@ def train_and_evaluate():
         'feature': feature_importance.index,
         'importance': feature_importance.values
     })
-    feature_importance_df.to_csv('analysis/feature_importance.csv', index=False)
+    feature_importance_df.to_csv('analysis/feature_importance2.csv', index=False)
     print("\nFeature importance analysis saved")
     
     return cv_score, feature_importance
