@@ -12,10 +12,14 @@ class ModelingPipeline:
         self.label_encoders = {}
         self.model = None
     
+    def _convert_mixed_types(self, series):
+        """Convert mixed-type series to strings"""
+        return series.astype(str)
+    
     def preprocess_features(self, df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
         """Preprocess features for modeling"""
         df = df.copy()
-        
+
         # Drop ID columns if present
         id_columns = ['uid', 'year']
         df = df.drop([col for col in id_columns if col in df.columns], axis=1)
@@ -42,6 +46,9 @@ class ModelingPipeline:
         
         # Label encode categorical columns
         for col in categorical_cols:
+            # Convert mixed types to string
+            df[col] = self._convert_mixed_types(df[col])
+            
             if is_training:
                 self.label_encoders[col] = LabelEncoder()
                 df[col] = self.label_encoders[col].fit_transform(df[col])
