@@ -583,3 +583,246 @@ class FeatureEngineerV2:
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply feature engineering to new data"""
         return self.fit_transform(df)
+
+    
+class FeatureEngineerHybrid:
+    """Hybrid feature engineering combining best original and engineered features"""
+    
+    def __init__(self):
+        # Key original features based on importance analysis
+        self.important_original_features = [
+            'edu_gru_12', 'edu_gru_03',  # Education
+            'age_12', 'age_03',          # Age
+            'hincome_12', 'hincome_03',  # Income
+            'rrfcntx_m_12',              # Social contact
+            'n_living_child_12',         # Family
+            'reads_12', 'games_12',      # Cognitive activities
+            'rameduc_m', 'rafeduc_m',    # Parental education
+            'rjlocc_m_12',               # Occupation
+            'j11_12',                    # Housing
+            'rsocact_m_12',              # Social activities
+            'n_depr_12', 'n_depr_03',    # Depression
+            'bmi_12', 'bmi_03',          # Health
+            'rjob_hrswk_12',             # Work hours
+            'a34_12'                     # Language skills
+        ]
+        
+        # Feature groups for engineering
+        self.feature_groups = {
+            'cognitive': ['reads_12', 'games_12', 'attends_class_12'],
+            'social': ['rrfcntx_m_12', 'rsocact_m_12', 'n_living_child_12'],
+            'health': ['n_depr_12', 'bmi_12', 'n_illnesses_12'],
+            'economic': ['hincome_12', 'rjob_hrswk_12', 'hinc_business_12']
+        }
+    
+    def _convert_to_numeric(self, df: pd.DataFrame, col: str) -> pd.Series:
+        """Convert column to numeric, handling categorical variables"""
+        if df[col].dtype == 'object':
+            if 'edu' in col:
+                edu_order = {
+                    'no education': 0,
+                    'incomplete primary': 1,
+                    'primary': 2,
+                    'incomplete secondary': 3,
+                    'secondary': 4,
+                    'preparatory or higher': 5
+                }
+                return df[col].map(edu_order).fillna(0)
+            elif 'age' in col:
+                age_map = {
+                    '50-54': 52, '55-59': 57, '60-64': 62,
+                    '65-69': 67, '70-74': 72, '75-79': 77,
+                    '80-84': 82, '85+': 87
+                }
+                return df[col].map(age_map).fillna(df[col].map(age_map).median())
+            else:
+                return pd.Categorical(df[col]).codes
+        return df[col]
+    
+    def create_cognitive_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create cognitive activity composite score"""
+        df = df.copy()
+        
+        cognitive_cols = self.feature_groups['cognitive']
+        valid_cols = [col for col in cognitive_cols if col in df.columns]
+        
+        if valid_cols:
+            # Convert to numeric and normalize
+            for col in valid_cols:
+                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                if df[f"{col}_norm"].std() != 0:
+                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+            
+            norm_cols = [f"{col}_norm" for col in valid_cols]
+            df['cognitive_activity_score'] = df[norm_cols].mean(axis=1)
+            
+        return df
+    
+    def create_social_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create social engagement composite score"""
+        df = df.copy()
+        
+        social_cols = self.feature_groups['social']
+        valid_cols = [col for col in social_cols if col in df.columns]
+        
+        if valid_cols:
+            # Convert to numeric and normalize
+            for col in valid_cols:
+                df[f"{col}_norm"] = pd.to_numeric(self._convert_to_numeric(df, col), errors='coerce').fillna(0)
+                if df[f"{col}_norm"].std() != 0:
+                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+            
+            norm_cols = [f"{col}_norm" for col in valid_cols]
+            df['social_engagement_score'] = df[norm_cols].mean(axis=1)
+        
+        return df
+    
+    def create_health_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create health composite score"""
+        df = df.copy()
+        
+        health_cols = self.feature_groups['health']
+        valid_cols = [col for col in health_cols if col in df.columns]
+        
+        if valid_cols:
+            # Convert to numeric and normalize
+            for col in valid_cols:
+                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                if df[f"{col}_norm"].std() != 0:
+                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+            
+            norm_cols = [f"{col}_norm" for col in valid_cols]
+            df['health_status_score'] = -df[norm_cols].mean(axis=1)  # Negative because higher values indicate worse health
+        
+        return df
+    
+    def create_economic_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create economic stability score"""
+        df = df.copy()
+        
+        economic_cols = self.feature_groups['economic']
+        valid_cols = [col for col in economic_cols if col in df.columns]
+        
+        if valid_cols:
+            # Convert to numeric and normalize
+            for col in valid_cols:
+                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                if df[f"{col}_norm"].std() != 0:
+                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+            
+            norm_cols = [f"{col}_norm" for col in valid_cols]
+            df['economic_stability_score'] = df[norm_cols].mean(axis=1)
+        
+        return df
+    
+    def create_key_interactions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create important feature interactions"""
+        df = df.copy()
+        
+        # Education-Cognitive interaction
+        if 'edu_gru_12' in df.columns and 'cognitive_activity_score' in df.columns:
+            df['edu_cognitive_interaction'] = (
+                self._convert_to_numeric(df, 'edu_gru_12') * 
+                df['cognitive_activity_score']
+            )
+        
+        # Age-Health interaction
+        if 'age_12' in df.columns and 'health_status_score' in df.columns:
+            age_numeric = self._convert_to_numeric(df, 'age_12')
+            df['age_health_interaction'] = age_numeric * df['health_status_score']
+        
+        # Social-Economic interaction
+        if 'social_engagement_score' in df.columns and 'economic_stability_score' in df.columns:
+            df['social_economic_interaction'] = (
+                df['social_engagement_score'] * 
+                df['economic_stability_score']
+            )
+        
+        return df
+    
+    def create_temporal_changes(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create temporal changes for key numeric features"""
+        df = df.copy()
+        
+        # Define pairs of features to calculate changes
+        temporal_pairs = [
+            ('hincome_03', 'hincome_12'),
+            ('n_depr_03', 'n_depr_12'),
+            ('n_illnesses_03', 'n_illnesses_12')
+        ]
+        
+        for col_03, col_12 in temporal_pairs:
+            if col_03 in df.columns and col_12 in df.columns:
+                base_name = col_03[:-3]
+                df[f"{base_name}_change"] = (
+                    pd.to_numeric(df[col_12], errors='coerce').fillna(0) - 
+                    pd.to_numeric(df[col_03], errors='coerce').fillna(0)
+                )
+        
+        return df
+    
+    def select_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Select original important features and add engineered features"""
+        df = df.copy()
+        
+        # Keep only important original features
+        original_features = [col for col in self.important_original_features if col in df.columns]
+        selected_df = df[original_features].copy()
+        
+        # Add engineered features
+        engineered_features = [
+            'cognitive_activity_score',
+            'social_engagement_score',
+            'health_status_score',
+            'economic_stability_score',
+            'edu_cognitive_interaction',
+            'age_health_interaction',
+            'social_economic_interaction',
+            'hincome_change',
+            'n_depr_change',
+            'n_illnesses_change'
+        ]
+        
+        for col in engineered_features:
+            if col in df.columns:
+                selected_df[col] = df[col]
+        
+        return selected_df
+    
+    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply hybrid feature engineering pipeline"""
+        print("Starting hybrid feature engineering pipeline...")
+        print(f"Initial shape: {df.shape}")
+        
+        # Create composite scores
+        df = self.create_cognitive_score(df)
+        print("Created cognitive score")
+        
+        df = self.create_social_score(df)
+        print("Created social score")
+        
+        df = self.create_health_score(df)
+        print("Created health score")
+        
+        df = self.create_economic_score(df)
+        print("Created economic score")
+        
+        # Create interactions and temporal features
+        df = self.create_key_interactions(df)
+        print("Created key interactions")
+        
+        df = self.create_temporal_changes(df)
+        print("Created temporal changes")
+        
+        # Select final feature set
+        df = self.select_features(df)
+        print(f"Final shape: {df.shape}")
+        
+        # Handle any remaining missing values
+        df = df.fillna(0)
+        
+        return df
+    
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply feature engineering to new data"""
+        return self.fit_transform(df)
