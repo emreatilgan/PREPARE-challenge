@@ -1,0 +1,2 @@
+num_leaves,max_depth,min_data_in_leaf,learning_rate,n_estimators,feature_fraction,bagging_fraction,bagging_freq,lambda_l1,lambda_l2,min_gain_to_split,min_child_weight
+92,15,10,0.008423468371078581,607,0.7906570154241728,0.6799644146936743,4,1.4810302857746823e-06,0.027379665173158645,0.04986271679503642,4.837034251420047
