@@ -591,6 +591,7 @@ class FeatureEngineerHybrid:
     def __init__(self):
         # Key original features based on importance analysis
         self.important_original_features = [
+            'uid',  # Add uid to preserve it
             'edu_gru_12', 'edu_gru_03',  # Education
             'age_12', 'age_03',          # Age
             'hincome_12', 'hincome_03',  # Income
@@ -614,7 +615,36 @@ class FeatureEngineerHybrid:
             'health': ['n_depr_12', 'bmi_12', 'n_illnesses_12'],
             'economic': ['hincome_12', 'rjob_hrswk_12', 'hinc_business_12']
         }
-    
+
+    def select_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Select original important features and add engineered features"""
+        # Start with copy of DataFrame to avoid modifying original
+        df = df.copy()
+        
+        # Keep only important original features
+        original_features = [col for col in self.important_original_features if col in df.columns]
+        selected_df = df[original_features].copy()
+        
+        # Add engineered features if they exist
+        engineered_features = [
+            'cognitive_activity_score',
+            'social_engagement_score',
+            'health_status_score',
+            'economic_stability_score',
+            'edu_cognitive_interaction',
+            'age_health_interaction',
+            'social_economic_interaction',
+            'hincome_change',
+            'n_depr_change',
+            'n_illnesses_change'
+        ]
+        
+        for col in engineered_features:
+            if col in df.columns:
+                selected_df[col] = df[col]
+        
+        return selected_df
+
     def _convert_to_numeric(self, df: pd.DataFrame, col: str) -> pd.Series:
         """Convert column to numeric, handling categorical variables"""
         series = df[col].copy()  # Ensure we're working with a copy
