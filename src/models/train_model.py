@@ -16,7 +16,7 @@ def process_parameters(params: dict) -> dict:
     # Define which parameters should be integers
     int_params = [
         'num_leaves', 'bagging_freq', 'min_child_samples',
-        'max_depth', 'min_data_in_leaf'
+        'max_depth', 'min_data_in_leaf', 'num_iterations', 'n_estimators'
     ]
     
     # Convert parameters to appropriate types
@@ -54,7 +54,7 @@ def train_and_evaluate():
     
     # Load and process best parameters
     try:
-        raw_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        raw_params = pd.read_csv('models/best_params_hybrid.csv').iloc[0].to_dict()
         best_params = process_parameters(raw_params)
         print("\nLoaded best parameters:")
         for key, value in best_params.items():
@@ -63,7 +63,7 @@ def train_and_evaluate():
         print("\nNo optimized parameters found. Running hyperparameter optimization first...")
         from src.models.optimize import main as optimize_main
         optimize_main()
-        raw_params = pd.read_csv('models/best_params.csv').iloc[0].to_dict()
+        raw_params = pd.read_csv('models/best_params_hybrid.csv').iloc[0].to_dict()
         best_params = process_parameters(raw_params)
     
     # Create feature engineer
@@ -133,11 +133,11 @@ def train_and_evaluate():
     print(submission['composite_score'].describe())
     
     # Save submission
-    submission.to_csv('submissions/submission_hybrid_optimal.csv', index=False)
+    submission.to_csv('submissions/submission_hybrid_optimal2.csv', index=False)
     print(f"\nSubmission saved with {len(submission)} predictions")
     
     # Save model
-    pipeline.save('models/model_optimal_hybrid.pkl')
+    pipeline.save('models/model_optimal_hybrid2.pkl')
     print("\nModel saved")
     
     # Save feature importance analysis
@@ -145,7 +145,7 @@ def train_and_evaluate():
         'feature': feature_importance.index,
         'importance': feature_importance.values
     })
-    feature_importance_df.to_csv('analysis/feature_importance_hybrid_optimal.csv', index=False)
+    feature_importance_df.to_csv('analysis/feature_importance_hybrid_optimal2.csv', index=False)
     print("\nFeature importance analysis saved")
     
     return cv_score, feature_importance

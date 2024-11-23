@@ -3,14 +3,36 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder
 import lightgbm as lgb
 from sklearn.metrics import mean_squared_error
 from typing import Dict, List, Tuple
 from src.features.build_features import FeatureEngineerHybrid
 
+def encode_categorical_features(df: pd.DataFrame, encoders: Dict = None, is_training: bool = True) -> Tuple[pd.DataFrame, Dict]:
+    """Encode categorical features"""
+    df = df.copy()
+    if encoders is None:
+        encoders = {}
+    
+    # Handle categorical features
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    
+    for col in categorical_cols:
+        if is_training:
+            encoders[col] = LabelEncoder()
+            df[col] = encoders[col].fit_transform(df[col].astype(str))
+        else:
+            # Handle unseen categories for test data
+            df[col] = df[col].astype(str)
+            df[col] = df[col].map(lambda x: x if x in encoders[col].classes_ else encoders[col].classes_[0])
+            df[col] = encoders[col].transform(df[col])
+    
+    return df, encoders
+
 def prepare_data(train_features: pd.DataFrame, train_labels: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     """Prepare data for modeling"""
-    # Merge on uid
+    # Merge features with labels
     train_data = train_features.merge(
         train_labels,
         on='uid',
@@ -22,37 +44,10 @@ def prepare_data(train_features: pd.DataFrame, train_labels: pd.DataFrame) -> Tu
     X = train_data.drop([col for col in features_to_drop if col in train_data.columns], axis=1)
     y = train_data['composite_score']
     
+    # Encode categorical features
+    X, _ = encode_categorical_features(X, is_training=True)
+    
     return X, y
-
-def preprocess_data(df: pd.DataFrame, is_training: bool = True, encoders: Dict = None) -> Tuple[pd.DataFrame, Dict]:
-    """Preprocess features"""
-    df = df.copy()
-    
-    # Handle missing values
-    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
-    categorical_cols = df.select_dtypes(include=['object']).columns
-    
-    # Fill numeric missing values with median
-    for col in numeric_cols:
-        if is_training:
-            median_val = df[col].median()
-            df[col] = df[col].fillna(median_val)
-            if encoders is not None:
-                encoders[f'{col}_median'] = median_val
-        else:
-            df[col] = df[col].fillna(encoders[f'{col}_median'])
-    
-    # Fill categorical missing values with mode
-    for col in categorical_cols:
-        if is_training:
-            mode_val = df[col].mode()[0]
-            df[col] = df[col].fillna(mode_val)
-            if encoders is not None:
-                encoders[f'{col}_mode'] = mode_val
-        else:
-            df[col] = df[col].fillna(encoders[f'{col}_mode'])
-    
-    return df, encoders
 
 def suggest_hyperparameters(trial: optuna.Trial) -> Dict:
     """Suggest hyperparameters for LightGBM"""
@@ -82,10 +77,7 @@ def suggest_hyperparameters(trial: optuna.Trial) -> Dict:
         'min_gain_to_split': trial.suggest_float('min_gain_to_split', 0.001, 0.1),
         
         # Additional parameters
-        'min_child_weight': trial.suggest_float('min_child_weight', 1e-3, 10.0, log=True),
-        'cat_smooth': trial.suggest_float('cat_smooth', 1.0, 100.0),
-        'cat_l2': trial.suggest_float('cat_l2', 1.0, 100.0),
-        'max_cat_threshold': trial.suggest_int('max_cat_threshold', 16, 64)
+        'min_child_weight': trial.suggest_float('min_child_weight', 1e-3, 10.0, log=True)
     }
 
 def objective(trial: optuna.Trial, X: pd.DataFrame, y: pd.Series, n_splits: int = 5) -> float:
@@ -131,6 +123,10 @@ def objective(trial: optuna.Trial, X: pd.DataFrame, y: pd.Series, n_splits: int 
 
 def optimize_hyperparameters(X: pd.DataFrame, y: pd.Series, n_trials: int = 100) -> Dict:
     """Run hyperparameter optimization"""
+    print(f"\nStarting optimization with {len(X.columns)} features")
+    print("\nFeature dtypes:")
+    print(X.dtypes.value_counts())
+    
     study = optuna.create_study(
         direction='minimize',
         sampler=optuna.samplers.TPESampler(seed=42),
@@ -171,14 +167,10 @@ def main():
     feature_engineer = FeatureEngineerHybrid()
     train_features_engineered = feature_engineer.fit_transform(train_features)
     
-    print("\nPreparing data...")
+    print("\nPreparing and preprocessing data...")
     X, y = prepare_data(train_features_engineered, train_labels)
     
-    print("\nPreprocessing data...")
-    X_processed, _ = preprocess_data(X)
-    
-    print(f"\nStarting hyperparameter optimization with {len(X_processed.columns)} features...")
-    best_params = optimize_hyperparameters(X_processed, y, n_trials=50)
+    best_params = optimize_hyperparameters(X, y, n_trials=50)
     
     # Save best parameters
     pd.DataFrame([best_params]).to_csv('models/best_params_hybrid.csv', index=False)
