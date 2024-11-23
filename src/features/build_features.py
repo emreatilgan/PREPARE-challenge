@@ -617,7 +617,9 @@ class FeatureEngineerHybrid:
     
     def _convert_to_numeric(self, df: pd.DataFrame, col: str) -> pd.Series:
         """Convert column to numeric, handling categorical variables"""
-        if df[col].dtype == 'object':
+        series = df[col].copy()  # Ensure we're working with a copy
+        
+        if series.dtype == 'object':
             if 'edu' in col:
                 edu_order = {
                     'no education': 0,
@@ -627,17 +629,23 @@ class FeatureEngineerHybrid:
                     'secondary': 4,
                     'preparatory or higher': 5
                 }
-                return df[col].map(edu_order).fillna(0)
+                return pd.Series(series.map(edu_order).fillna(0), index=series.index)
             elif 'age' in col:
                 age_map = {
                     '50-54': 52, '55-59': 57, '60-64': 62,
                     '65-69': 67, '70-74': 72, '75-79': 77,
                     '80-84': 82, '85+': 87
                 }
-                return df[col].map(age_map).fillna(df[col].map(age_map).median())
+                return pd.Series(series.map(age_map).fillna(series.map(age_map).median()), index=series.index)
             else:
-                return pd.Categorical(df[col]).codes
-        return df[col]
+                return pd.Series(pd.Categorical(series).codes, index=series.index)
+        return series
+    
+    def _normalize_series(self, series: pd.Series) -> pd.Series:
+        """Normalize a series to have zero mean and unit variance"""
+        if series.std() != 0:
+            return (series - series.mean()) / series.std()
+        return series
     
     def create_cognitive_score(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create cognitive activity composite score"""
@@ -647,15 +655,14 @@ class FeatureEngineerHybrid:
         valid_cols = [col for col in cognitive_cols if col in df.columns]
         
         if valid_cols:
-            # Convert to numeric and normalize
+            normalized_cols = []
             for col in valid_cols:
-                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                if df[f"{col}_norm"].std() != 0:
-                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+                numeric_col = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                df[f"{col}_norm"] = self._normalize_series(numeric_col)
+                normalized_cols.append(f"{col}_norm")
             
-            norm_cols = [f"{col}_norm" for col in valid_cols]
-            df['cognitive_activity_score'] = df[norm_cols].mean(axis=1)
-            
+            df['cognitive_activity_score'] = df[normalized_cols].mean(axis=1)
+        
         return df
     
     def create_social_score(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -666,14 +673,13 @@ class FeatureEngineerHybrid:
         valid_cols = [col for col in social_cols if col in df.columns]
         
         if valid_cols:
-            # Convert to numeric and normalize
+            normalized_cols = []
             for col in valid_cols:
-                df[f"{col}_norm"] = pd.to_numeric(self._convert_to_numeric(df, col), errors='coerce').fillna(0)
-                if df[f"{col}_norm"].std() != 0:
-                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+                numeric_col = pd.to_numeric(self._convert_to_numeric(df, col), errors='coerce').fillna(0)
+                df[f"{col}_norm"] = self._normalize_series(numeric_col)
+                normalized_cols.append(f"{col}_norm")
             
-            norm_cols = [f"{col}_norm" for col in valid_cols]
-            df['social_engagement_score'] = df[norm_cols].mean(axis=1)
+            df['social_engagement_score'] = df[normalized_cols].mean(axis=1)
         
         return df
     
@@ -685,14 +691,13 @@ class FeatureEngineerHybrid:
         valid_cols = [col for col in health_cols if col in df.columns]
         
         if valid_cols:
-            # Convert to numeric and normalize
+            normalized_cols = []
             for col in valid_cols:
-                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                if df[f"{col}_norm"].std() != 0:
-                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+                numeric_col = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                df[f"{col}_norm"] = self._normalize_series(numeric_col)
+                normalized_cols.append(f"{col}_norm")
             
-            norm_cols = [f"{col}_norm" for col in valid_cols]
-            df['health_status_score'] = -df[norm_cols].mean(axis=1)  # Negative because higher values indicate worse health
+            df['health_status_score'] = -df[normalized_cols].mean(axis=1)  # Negative because higher values indicate worse health
         
         return df
     
@@ -704,14 +709,13 @@ class FeatureEngineerHybrid:
         valid_cols = [col for col in economic_cols if col in df.columns]
         
         if valid_cols:
-            # Convert to numeric and normalize
+            normalized_cols = []
             for col in valid_cols:
-                df[f"{col}_norm"] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                if df[f"{col}_norm"].std() != 0:
-                    df[f"{col}_norm"] = (df[f"{col}_norm"] - df[f"{col}_norm"].mean()) / df[f"{col}_norm"].std()
+                numeric_col = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                df[f"{col}_norm"] = self._normalize_series(numeric_col)
+                normalized_cols.append(f"{col}_norm")
             
-            norm_cols = [f"{col}_norm" for col in valid_cols]
-            df['economic_stability_score'] = df[norm_cols].mean(axis=1)
+            df['economic_stability_score'] = df[normalized_cols].mean(axis=1)
         
         return df
     
@@ -721,22 +725,17 @@ class FeatureEngineerHybrid:
         
         # Education-Cognitive interaction
         if 'edu_gru_12' in df.columns and 'cognitive_activity_score' in df.columns:
-            df['edu_cognitive_interaction'] = (
-                self._convert_to_numeric(df, 'edu_gru_12') * 
-                df['cognitive_activity_score']
-            )
+            edu_numeric = pd.Series(self._convert_to_numeric(df, 'edu_gru_12'), index=df.index)
+            df['edu_cognitive_interaction'] = edu_numeric * df['cognitive_activity_score']
         
         # Age-Health interaction
         if 'age_12' in df.columns and 'health_status_score' in df.columns:
-            age_numeric = self._convert_to_numeric(df, 'age_12')
+            age_numeric = pd.Series(self._convert_to_numeric(df, 'age_12'), index=df.index)
             df['age_health_interaction'] = age_numeric * df['health_status_score']
         
         # Social-Economic interaction
         if 'social_engagement_score' in df.columns and 'economic_stability_score' in df.columns:
-            df['social_economic_interaction'] = (
-                df['social_engagement_score'] * 
-                df['economic_stability_score']
-            )
+            df['social_economic_interaction'] = df['social_engagement_score'] * df['economic_stability_score']
         
         return df
     
@@ -754,22 +753,22 @@ class FeatureEngineerHybrid:
         for col_03, col_12 in temporal_pairs:
             if col_03 in df.columns and col_12 in df.columns:
                 base_name = col_03[:-3]
-                df[f"{base_name}_change"] = (
-                    pd.to_numeric(df[col_12], errors='coerce').fillna(0) - 
-                    pd.to_numeric(df[col_03], errors='coerce').fillna(0)
-                )
+                val_03 = pd.to_numeric(df[col_03], errors='coerce').fillna(0)
+                val_12 = pd.to_numeric(df[col_12], errors='coerce').fillna(0)
+                df[f"{base_name}_change"] = val_12 - val_03
         
         return df
     
     def select_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Select original important features and add engineered features"""
+        # Start with copy of DataFrame to avoid modifying original
         df = df.copy()
         
         # Keep only important original features
         original_features = [col for col in self.important_original_features if col in df.columns]
         selected_df = df[original_features].copy()
         
-        # Add engineered features
+        # Add engineered features if they exist
         engineered_features = [
             'cognitive_activity_score',
             'social_engagement_score',
