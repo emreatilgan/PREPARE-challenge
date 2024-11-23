@@ -1,9 +1,10 @@
+# src/models/train_model.py
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from src.models.lgb_model import LGBModel
 from src.models.pipeline import ModelingPipeline
-from src.features.build_features import FeatureEngineer, FeatureEngineerV2, FeatureEngineerHybrid
+from src.features.build_features import FeatureEngineerHybrid
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -32,6 +33,26 @@ def train_and_evaluate():
     test_features = pd.read_csv(data_dir / 'test_features.csv')
     submission_format = pd.read_csv(data_dir / 'submission_format.csv')
     
+    # Load best parameters
+    try:
+        best_params = pd.read_csv('../models/best_params.csv').iloc[0].to_dict()
+        print("\nLoaded best parameters:")
+        for key, value in best_params.items():
+            print(f"  {key}: {value}")
+    except FileNotFoundError:
+        print("\nNo optimized parameters found. Using default parameters.")
+        best_params = {
+            'objective': 'regression',
+            'metric': 'rmse',
+            'boosting_type': 'gbdt',
+            'num_leaves': 31,
+            'learning_rate': 0.05,
+            'feature_fraction': 0.9,
+            'bagging_fraction': 0.8,
+            'bagging_freq': 5,
+            'verbose': -1
+        }
+    
     # Create feature engineer
     feature_engineer = FeatureEngineerHybrid()
     
@@ -46,25 +67,20 @@ def train_and_evaluate():
     print("\nPreparing training data...")
     train_data = prepare_data(train_features_engineered, train_labels)
     
-    # Initialize pipeline with LightGBM model
+    # Initialize pipeline with optimal parameters
     pipeline = ModelingPipeline(
         model_class=LGBModel,
         model_params={
             'objective': 'regression',
             'metric': 'rmse',
-            'boosting_type': 'gbdt',
-            'num_leaves': 31,
-            'learning_rate': 0.05,
-            'feature_fraction': 0.9,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
-            'verbose': -1
+            'verbosity': -1,
+            **best_params
         }
     )
     
-    # Drop columns not needed for training
-    features_to_drop = ['uid', 'year']
-    X = train_data.drop(features_to_drop + ['composite_score'], axis=1)
+    # Drop non-feature columns
+    features_to_drop = ['uid', 'year', 'composite_score']
+    X = train_data.drop([col for col in features_to_drop if col in train_data.columns], axis=1)
     y = train_data['composite_score']
     
     print(f"\nTraining with {X.shape[1]} features on {len(X)} samples")
@@ -83,11 +99,6 @@ def train_and_evaluate():
     
     # Make predictions
     print("\nMaking predictions...")
-    
-    # Create final submission dataframe
-    submission = submission_format.copy()
-    
-    # Get predictions for test set
     test_predictions = pipeline.predict(test_features_engineered)
     
     # Round predictions to nearest integer and ensure they're within valid range
@@ -96,7 +107,8 @@ def train_and_evaluate():
     # Create a mapping from uid to prediction
     predictions_dict = dict(zip(test_features_engineered['uid'], test_predictions))
     
-    # Map predictions to submission format
+    # Create submission
+    submission = submission_format.copy()
     submission['composite_score'] = submission['uid'].map(predictions_dict).astype(int)
     
     # Verify submission format
@@ -108,11 +120,11 @@ def train_and_evaluate():
     print(submission['composite_score'].describe())
     
     # Save submission
-    submission.to_csv('submissions/submission_with_features_hybrid.csv', index=False)
+    submission.to_csv('submissions/submission_hybrid_optimal.csv', index=False)
     print(f"\nSubmission saved with {len(submission)} predictions")
     
     # Save model
-    pipeline.save('models/model_with_features_hybrid.pkl')
+    pipeline.save('models/model_optimal_hybrid.pkl')
     print("\nModel saved")
     
     # Save feature importance analysis
@@ -120,7 +132,7 @@ def train_and_evaluate():
         'feature': feature_importance.index,
         'importance': feature_importance.values
     })
-    feature_importance_df.to_csv('analysis/feature_importance_hybrid.csv', index=False)
+    feature_importance_df.to_csv('analysis/feature_importance_hybrid_optimal.csv', index=False)
     print("\nFeature importance analysis saved")
     
     return cv_score, feature_importance
